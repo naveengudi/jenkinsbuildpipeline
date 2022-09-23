@@ -18,7 +18,7 @@ pipeline {
         checkout([$class: 'GitSCM', branches: [
           [name: '*/staging']
         ], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [
-          [credentialsId: 'OutgrowDigital', url: 'https://gitlab.waycool.in/outgrow/ai-ml/outgrow-ai-crop-health.git']
+          [credentialsId: 'OutgrowDigital', url: 'https://github.com/naveengudi/jenkinsbuildpipeline.git']
         ]])
       }
     }
