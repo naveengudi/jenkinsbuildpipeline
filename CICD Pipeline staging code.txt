@@ -1,0 +1,148 @@
+pipeline {
+  agent any
+  environment {
+    registry = "outgrowdigital/outgrow-crophealth-staging"
+    registryCredential = 'outgrowDockerHub'
+    dockerImage = ''
+    DATREE_TOKEN = 'ea7b7f92-af49-4859-ac9f-e2ce9c2c50e5'
+    EMAIL_TO = 'outgrow-ai-ml@waycool.in'
+  }
+  options {
+    disableConcurrentBuilds()
+    gitLabConnection('Gitlab Connection')
+  }
+
+  stages {
+    stage('Pull from Staging') {
+      steps {
+        checkout([$class: 'GitSCM', branches: [
+          [name: '*/staging']
+        ], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [
+          [credentialsId: 'OutgrowDigital', url: 'https://gitlab.waycool.in/outgrow/ai-ml/outgrow-ai-crop-health.git']
+        ]])
+      }
+    }
+    stage('Checking K8s Policy Check') {
+      steps {
+        script {
+          updateGitlabCommitStatus name: 'K8s Policy Check', state: 'pending'
+          sh 'datree test *.yaml --only-k8s-files --ignore-missing-schemas'
+        }
+      }
+      post {
+        success {
+          updateGitlabCommitStatus name: 'K8s Policy Check', state: 'success'
+        }
+        failure {
+          updateGitlabCommitStatus name: 'K8s Policy Check', state: 'failed'
+        }
+      }
+    }
+    stage('Building Docker Image') {
+      steps {
+        script {
+          updateGitlabCommitStatus name: 'Building Docker Image', state: 'pending'
+          dockerImage = docker.build registry + ":$BUILD_NUMBER"
+        }
+      }
+      post {
+        success {
+          updateGitlabCommitStatus name: 'Building Docker Image', state: 'success'
+        }
+        failure {
+          updateGitlabCommitStatus name: 'Building Docker Image', state: 'failed'
+        }
+      }
+    }
+    stage('Upload to Staging Docker Hub') {
+      steps {
+        script {
+          updateGitlabCommitStatus name: 'Upload to Staging Docker Hub', state: 'pending'
+          docker.withRegistry('', registryCredential) {
+            dockerImage.push()
+            dockerImage.push 'latest'
+          }
+        }
+      }
+      post {
+        success {
+          updateGitlabCommitStatus name: 'Upload to Staging Docker Hub', state: 'success'
+        }
+        failure {
+          updateGitlabCommitStatus name: 'Upload to Staging Docker Hub', state: 'failed'
+        }
+      }
+    }
+    stage('Docker Files Cleanup') {
+      steps {
+        sh "docker rmi $registry"
+      }
+      post {
+        success {
+          updateGitlabCommitStatus name: 'Docker Files Cleanup', state: 'success'
+        }
+        failure {
+          updateGitlabCommitStatus name: 'Docker Files Cleanup', state: 'failed'
+        }
+      }
+    }
+    stage('Deploy to Staging K8s') {
+      steps {
+        script {
+          updateGitlabCommitStatus name: 'Deploy to Staging K8s', state: 'pending'
+          kubernetesDeploy(
+            configs: '**/outgrowStaging.yaml',
+            kubeconfigId: 'K8s-OutgrowDigital',
+            enableConfigSubstitution: false
+          )
+        }
+      }
+      post {
+          success {
+            updateGitlabCommitStatus name: 'Deploy to Staging K8s', state: 'success'
+          }
+          failure {
+            updateGitlabCommitStatus name: 'Deploy to Staging K8s', state: 'failed'
+          }
+        }
+    }
+  }
+  post {
+    always {
+      cleanWs(cleanWhenNotBuilt: true,
+        deleteDirs: true,
+        disableDeferredWipeout: true,
+        notFailBuild: true,
+        patterns: [
+          [pattern: '.gitignore', type: 'INCLUDE'],
+          [pattern: '.propsfile', type: 'EXCLUDE']
+        ])
+      print 'Cleaning up the Docker system.'
+      sh 'docker system prune -f'
+      updateGitlabCommitStatus name: 'Cleaning Flow Server', state: 'success'
+    }
+    failure {
+           emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                  subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Failed",
+                  attachLog: false, 
+                  mimeType: 'text/html',to:"${EMAIL_TO}"
+
+        }
+        success {
+                  emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                  subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Successful",
+                  attachLog: false, 
+                  mimeType: 'text/html',to:"${EMAIL_TO}"
+          }  
+        unstable {
+            emailext body: 'Check console output at $BUILD_URL to view the results. \n\n ----------- \n${BUILD_LOG, maxLines=10, escapeHtml=false}', 
+                    to: "${EMAIL_TO}", 
+                    subject: 'Unstable build in Outgrow Flow: $PROJECT_NAME - #$BUILD_NUMBER - #$BUILD_STATUS'
+        }
+        changed {
+                   emailext body: 'Check console output at $BUILD_URL to view the results.', 
+                    to: "${EMAIL_TO}", 
+                    subject: 'Outgrow Flow build is back to normal: $PROJECT_NAME - #$BUILD_NUMBER-        #$BUILD_STATUS'
+        }
+  }
+}
