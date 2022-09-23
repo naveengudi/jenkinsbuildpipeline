@@ -1,11 +1,11 @@
 pipeline {
   agent any
   environment {
-    registry = "outgrowdigital/outgrow-crophealth-staging"
-    registryCredential = 'outgrowDockerHub'
+    registry = "naveen/outgrow-crophealth-staging"
+    registryCredential = 'naveenDockerHub'
     dockerImage = ''
     DATREE_TOKEN = 'ea7b7f92-af49-4859-ac9f-e2ce9c2c50e5'
-    EMAIL_TO = 'outgrow-ai-ml@waycool.in'
+    EMAIL_TO = 'naveengudi9985@gmail.com'
   }
   options {
     disableConcurrentBuilds()
